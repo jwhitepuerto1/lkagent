@@ -1,0 +1,38 @@
+export const leads = [
+  {
+    id: "L-001",
+    name: "Maria Alvarez",
+    segment: "HNW",
+    source: "LinkedIn",
+    stage: "New",
+    owner: "John",
+    lastTouch: "2026-01-10",
+  },
+  {
+    id: "L-002",
+    name: "David Chen",
+    segment: "RIA",
+    source: "GCM Intelligence",
+    stage: "Qualified",
+    owner: "John",
+    lastTouch: "2026-01-09",
+  },
+  {
+    id: "L-003",
+    name: "Sofia Martinez",
+    segment: "Family Office",
+    source: "Referral",
+    stage: "Meeting Set",
+    owner: "John",
+    lastTouch: "2026-01-07",
+  },
+  {
+    id: "L-004",
+    name: "Carlos Rivera",
+    segment: "HNW",
+    source: "Apollo",
+    stage: "Nurture",
+    owner: "John",
+    lastTouch: "2026-01-06",
+  },
+];
