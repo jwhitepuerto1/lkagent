@@ -5,11 +5,104 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
+/**
+ * Identity Kernel (IAS System-of-Record foundation)
+ * - Party is the canonical identity container (person/org/unknown)
+ * - ContactPoint represents reachable identifiers (email/linkedin/phone/domain)
+ * - ExternalIdentity maps Party <-> external tool objects (Smartlead/Aimfox/Mautic/SuiteCRM/GlobalDB)
+ */
 
+enum PartyType {
+  PERSON
+  ORG
+  UNKNOWN
+}
+
+enum ContactPointType {
+  EMAIL
+  PHONE
+  LINKEDIN
+  DOMAIN
+  OTHER
+}
+
+enum ExternalSystem {
+  GLOBALDB
+  SMARTLEAD
+  AIMFOX
+  MAUTIC
+  SUITECRM
+  OTHER
+}
+
+enum ExternalObjectType {
+  CONTACT
+  LEAD
+  ACCOUNT
+  CAMPAIGN_MEMBER
+  OTHER
+}
+
+model Party {
+  id          String           @id @default(uuid())
+  type        PartyType        @default(UNKNOWN)
+  displayName String
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  // relations
+  contactPoints    ContactPoint[]
+  externalIdentities ExternalIdentity[]
+
+  // optional 1:1 bridge from legacy Lead -> Party
+  lead        Lead?
+}
+
+model ContactPoint {
+  id              String           @id @default(uuid())
+  partyId         String
+  type            ContactPointType
+  valueRaw        String?
+  valueNormalized String
+  isPrimary       Boolean          @default(false)
+  isVerified      Boolean          @default(false)
+  source          String?
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@index([partyId])
+  @@index([type, valueNormalized])
+}
+
+model ExternalIdentity {
+  id         String            @id @default(uuid())
+  partyId    String
+  system     ExternalSystem
+  objectType ExternalObjectType @default(CONTACT)
+  externalId String
+  createdAt  DateTime          @default(now())
+  updatedAt  DateTime          @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  // Hard requirements to prevent identity fragmentation across tools
+  @@unique([system, externalId])
+  @@unique([system, partyId, objectType])
+  @@index([partyId])
+}
+
+/**
+ * Legacy v2 models (keep working)
+ * - Lead remains your UI projection + current CRUD entity.
+ * - partyId is added as an OPTIONAL bridge, so nothing breaks until you backfill + start writing it.
+ */
 model Lead {
-  id           String   @id
+  id           String    @id
   name         String
   segment      String?
   stage        String?
@@ -18,8 +111,17 @@ model Lead {
   priority     String?
   nextActionAt DateTime?
   lastTouch    DateTime?
-  activities Activity[]
+
+  // NEW: Optional bridge into canonical identity
+  partyId      String?   @unique
+  party        Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+
+  activities   Activity[]
+
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 }
+
 model Activity {
   id         String   @id @default(cuid())
   leadId     String
@@ -32,4 +134,3 @@ model Activity {
 
   @@index([leadId, occurredAt])
 }
-
