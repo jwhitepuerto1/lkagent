@@ -4,7 +4,7 @@ import { useRouter } from "next/router";
 import { useEffect, useState } from "react";
 
 function isPublicPath(pathname) {
-  return pathname === "/login";
+  return pathname === "/login" || pathname.startsWith("/members");
 }
 
 export default function App({ Component, pageProps }) {
@@ -56,7 +56,7 @@ export default function App({ Component, pageProps }) {
     }
   }
 
-  const showNav = router.pathname !== "/login";
+  const showNav = router.pathname !== "/login" && !router.pathname.startsWith("/members");
 
   return (
     <>
