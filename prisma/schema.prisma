@@ -5,7 +5,6 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 /**
@@ -47,18 +46,22 @@ enum ExternalObjectType {
 }
 
 model Party {
-  id          String           @id @default(uuid())
-  type        PartyType        @default(UNKNOWN)
+  id          String    @id @default(uuid())
+  type        PartyType @default(UNKNOWN)
   displayName String
-  createdAt   DateTime         @default(now())
-  updatedAt   DateTime         @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   // relations
-  contactPoints    ContactPoint[]
+  contactPoints      ContactPoint[]
   externalIdentities ExternalIdentity[]
 
   // optional 1:1 bridge from legacy Lead -> Party
-  lead        Lead?
+  lead Lead?
+
+  // member identity system
+  memberAccount MemberAccount?
+  entitlements  Entitlement[]
 }
 
 model ContactPoint {
@@ -80,19 +83,76 @@ model ContactPoint {
 }
 
 model ExternalIdentity {
-  id         String            @id @default(uuid())
+  id         String             @id @default(uuid())
   partyId    String
   system     ExternalSystem
   objectType ExternalObjectType @default(CONTACT)
   externalId String
-  createdAt  DateTime          @default(now())
-  updatedAt  DateTime          @updatedAt
+  createdAt  DateTime           @default(now())
+  updatedAt  DateTime           @updatedAt
 
   party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
 
   // Hard requirements to prevent identity fragmentation across tools
   @@unique([system, externalId])
   @@unique([system, partyId, objectType])
+  @@index([partyId])
+}
+
+/**
+ * Member identity system (self-service registration/login)
+ * - MemberAccount is the 1:1 credential/login bridge onto Party.
+ * - Entitlement is a per-module access grant, so future modules can require
+ * staff approval (PENDING) without changing this shape.
+ */
+enum MemberStatus {
+  ACTIVE
+  DISABLED
+}
+
+enum EntitlementModule {
+  RESOURCES
+  CAPITAL_RAISE
+  DATA_ROOM
+  INVESTMENT_ACCOUNT
+}
+
+enum EntitlementStatus {
+  GRANTED
+  PENDING
+  DENIED
+  REVOKED
+}
+
+model MemberAccount {
+  id           String       @id @default(uuid())
+  partyId      String       @unique
+  firstName    String
+  lastName     String
+  email        String       @unique
+  passwordHash String
+  status       MemberStatus @default(ACTIVE)
+  lastLoginAt  DateTime?
+  createdAt    DateTime     @default(now())
+  updatedAt    DateTime     @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+}
+
+model Entitlement {
+  id          String            @id @default(uuid())
+  partyId     String
+  module      EntitlementModule
+  status      EntitlementStatus @default(GRANTED)
+  requestedAt DateTime          @default(now())
+  grantedAt   DateTime?
+  grantedBy   String?
+  createdAt   DateTime          @default(now())
+  updatedAt   DateTime          @updatedAt
+
+  party Party @relation(fields: [partyId], references: [id], onDelete: Cascade)
+
+  @@unique([partyId, module])
   @@index([partyId])
 }
 
@@ -113,13 +173,13 @@ model Lead {
   lastTouch    DateTime?
 
   // NEW: Optional bridge into canonical identity
-  partyId      String?   @unique
-  party        Party?    @relation(fields: [partyId], references: [id], onDelete: SetNull)
+  partyId String? @unique
+  party   Party?  @relation(fields: [partyId], references: [id], onDelete: SetNull)
 
-  activities   Activity[]
+  activities Activity[]
 
-  createdAt    DateTime  @default(now())
-  updatedAt    DateTime  @updatedAt
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 model Activity {
@@ -130,7 +190,550 @@ model Activity {
   occurredAt DateTime @default(now())
   createdAt  DateTime @default(now())
 
-  lead       Lead     @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  lead Lead @relation(fields: [leadId], references: [id], onDelete: Cascade)
 
   @@index([leadId, occurredAt])
+}
+
+/**
+ * LinkedIn Post Generation + Publishing Agent (Phase 1)
+ * - Generation Agent: LinkedinDestination/InsightTopic/EducationalAsset catalogs feed
+ * ContentCampaign -> CampaignTheme -> GeneratedPost, gated by approval + validation.
+ * - Publishing Agent: PublishingJob is the literal handoff table (spec section 14
+ * contract) created only from approved+locked GeneratedPost rows. Phase 1 publishing
+ * is fully supervised (no live LinkedIn API calls) - PublishedPost records a manually
+ * entered proof URL rather than automated confirmation.
+ */
+
+enum LinkedinDestinationType {
+  PERSONAL
+  COMPANY
+  GROUP
+}
+
+enum LinkedinDestinationStatus {
+  ACTIVE
+  PAUSED
+  BLOCKED
+  LEFT
+}
+
+enum PublishingMode {
+  SUPERVISED
+  AUTOMATIC
+}
+
+enum PostType {
+  INSIGHT
+  ASSET
+}
+
+enum TopicSelectionMode {
+  AUTOMATIC
+  SPECIFIED
+}
+
+enum AssetSelectionMode {
+  AUTOMATIC
+  SPECIFIED
+}
+
+// Shared lifecycle for ContentCampaign.status and CampaignTheme.status.
+enum ContentLifecycleStatus {
+  DRAFT
+  GENERATING
+  VALIDATION_FAILED
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  READY_TO_PUBLISH
+  SUSPENDED
+}
+
+enum ValidationStatus {
+  PENDING
+  PASSED
+  FAILED
+}
+
+// Per-GeneratedPost approval state. LOCKED is the literal
+// "generated_post.approval_status=locked" the handoff contract checks.
+enum ApprovalStatus {
+  DRAFT
+  IN_REVIEW
+  CHANGES_REQUESTED
+  APPROVED
+  LOCKED
+}
+
+enum ApprovalLevel {
+  PLACEMENT
+  THEME
+  CAMPAIGN
+}
+
+enum ApprovalAction {
+  APPROVE
+  REQUEST_CHANGES
+  LOCK
+}
+
+enum ValidationCheckCode {
+  REQUIRED_FIELDS
+  SOURCE_ACTIVE
+  DESTINATION_ACTIVE
+  URL_SYNTAX
+  CHAR_LIMIT
+  URL_PLACEMENT
+  DUPLICATE_CONTENT
+  SIMILARITY
+  DESTINATION_VOICE
+  CTA_MATCH
+  VARIANT_COUNT
+}
+
+enum ValidationFailureReason {
+  INVALID_CAMPAIGN_LENGTH
+  COUNT_MISMATCH
+  INVALID_GROUP_COUNT
+  INSUFFICIENT_TOPICS
+  INSUFFICIENT_ASSETS
+  ASSET_COPY_MISSING
+  URL_INVALID
+  SOURCE_CONFLICT
+  UNSUPPORTED_CLAIM
+  DUPLICATE_CONTENT
+  HIGH_SIMILARITY
+  DESTINATION_RULE_FAILURE
+  GENERATION_INCOMPLETE
+  APPROVAL_HASH_MISMATCH
+  DATABASE_WRITE_FAILURE
+}
+
+enum GenerationRunType {
+  OUTLINE
+  COPY
+}
+
+enum GenerationRunStatus {
+  SUCCESS
+  FAILED
+}
+
+// Full spec state model. Phase 1's supervised UI only exercises a subset;
+// PUBLISHING/VERIFYING/RETRY_READY are reserved for a future live-API phase.
+enum PublishingJobStatus {
+  DRAFT
+  APPROVED
+  QUEUED
+  PRECHECK
+  AWAITING_HUMAN
+  PUBLISHING
+  VERIFYING
+  PENDING_GROUP_REVIEW
+  PUBLISHED
+  RETRY_READY
+  BLOCKED
+  FAILED
+  SKIPPED
+  CANCELLED
+}
+
+enum PublicationAttemptAction {
+  PRECHECK
+  CONFIRM
+  BLOCK
+  SKIP
+  CANCEL
+  MARK_PENDING_REVIEW
+}
+
+enum PublicationAttemptResult {
+  OK
+  FAILED
+}
+
+enum ModerationStatus {
+  NONE
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+model LinkedinDestination {
+  id                      String                    @id @default(uuid())
+  destinationType         LinkedinDestinationType
+  name                    String
+  linkedinReference       String?
+  status                  LinkedinDestinationStatus @default(ACTIVE)
+  audienceDescription     String?
+  rulesSummary            String?
+  promotionalLinksAllowed Boolean                   @default(true)
+  requiresModeratorReview Boolean                   @default(false)
+  preferredDaysTimes      String?
+  postingFrequencyCeiling Int?
+  lastSuccessfulPostAt    DateTime?
+  urlPlacementPolicy      String                    @default("end")
+  templateNotes           String?
+  publishingMode          PublishingMode            @default(SUPERVISED)
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
+
+  campaignsAsPersonal ContentCampaign[]      @relation("CampaignPersonalDestination")
+  campaignsAsCompany  ContentCampaign[]      @relation("CampaignCompanyDestination")
+  campaignGroupLinks  ContentCampaignGroup[]
+  generatedPosts      GeneratedPost[]
+  publishingJobs      PublishingJob[]
+  publishedPosts      PublishedPost[]
+
+  @@index([destinationType, status])
+}
+
+model InsightTopic {
+  id               String    @id @default(uuid())
+  name             String
+  description      String
+  approvedAngles   Json
+  prohibitedAngles Json
+  targetAudiences  Json
+  supportingFacts  Json
+  preferredCtaType String?
+  lastUsedAt       DateTime?
+  active           Boolean   @default(true)
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  themes CampaignTheme[]
+
+  @@index([active])
+}
+
+model EducationalAsset {
+  id               String    @id @default(uuid())
+  assetName        String
+  assetType        String
+  canonicalUrl     String
+  sourceCopy       String
+  shortSummary     String
+  learningOutcomes Json
+  targetAudiences  Json
+  primaryProblem   String
+  approvedCta      String
+  gatingType       String    @default("none")
+  urlStatus        String    @default("unchecked")
+  lastUrlCheckAt   DateTime?
+  lastUsedAt       DateTime?
+  active           Boolean   @default(true)
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  themes CampaignTheme[]
+
+  @@index([active])
+}
+
+model ContentCampaign {
+  id                             String                 @id @default(uuid())
+  campaignName                   String
+  campaignDays                   Int
+  startDate                      DateTime
+  timezone                       String
+  insightPostCount               Int
+  assetPostCount                 Int
+  personalDestinationId          String
+  companyDestinationId           String
+  topicSelectionMode             TopicSelectionMode     @default(AUTOMATIC)
+  topicSelectionConfig           Json?
+  assetSelectionMode             AssetSelectionMode     @default(AUTOMATIC)
+  assetSelectionConfig           Json?
+  styleTone                      String
+  stylePostLength                String
+  styleCtaStrength               String
+  styleUseHashtags               Boolean                @default(true)
+  styleMaxHashtags               Int                    @default(3)
+  styleIncludeQuestion           Boolean                @default(true)
+  styleGroupPersonalizationLevel String                 @default("individual_group")
+  status                         ContentLifecycleStatus @default(DRAFT)
+  suspended                      Boolean                @default(false)
+  createdBy                      String                 @default("admin")
+  createdAt                      DateTime               @default(now())
+  updatedAt                      DateTime               @updatedAt
+
+  personalDestination LinkedinDestination       @relation("CampaignPersonalDestination", fields: [personalDestinationId], references: [id])
+  companyDestination  LinkedinDestination       @relation("CampaignCompanyDestination", fields: [companyDestinationId], references: [id])
+  groupDestinations   ContentCampaignGroup[]
+  themes              CampaignTheme[]
+  generatedPosts      GeneratedPost[]
+  generationRuns      PostGenerationRun[]
+  approvals           ContentApproval[]
+  validationResults   ContentValidationResult[]
+  publishingJobs      PublishingJob[]
+
+  @@index([status])
+}
+
+model ContentCampaignGroup {
+  id            String   @id @default(uuid())
+  campaignId    String
+  destinationId String
+  createdAt     DateTime @default(now())
+
+  campaign    ContentCampaign     @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  destination LinkedinDestination @relation(fields: [destinationId], references: [id])
+
+  @@unique([campaignId, destinationId])
+  @@index([campaignId])
+}
+
+model CampaignTheme {
+  id              String                 @id @default(uuid())
+  campaignId      String
+  dayIndex        Int
+  postDate        DateTime
+  postType        PostType
+  topicId         String?
+  assetId         String?
+  audienceSummary String?
+  centralPoint    String
+  hookConcept     String
+  ctaConcept      String
+  status          ContentLifecycleStatus @default(DRAFT)
+  suspended       Boolean                @default(false)
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  campaign          ContentCampaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  topic             InsightTopic?             @relation(fields: [topicId], references: [id])
+  asset             EducationalAsset?         @relation(fields: [assetId], references: [id])
+  generatedPosts    GeneratedPost[]
+  generationRuns    PostGenerationRun[]
+  approvals         ContentApproval[]
+  validationResults ContentValidationResult[]
+  publishingJobs    PublishingJob[]
+
+  @@unique([campaignId, dayIndex])
+  @@index([campaignId, status])
+}
+
+model GeneratedPost {
+  id                String           @id @default(uuid())
+  campaignId        String
+  themeId           String
+  destinationId     String
+  postType          PostType
+  postText          String
+  contentHash       String
+  lockedContentHash String?
+  copyVersion       Int              @default(1)
+  urlIncluded       String?
+  hashtags          Json?
+  validationStatus  ValidationStatus @default(PENDING)
+  approvalStatus    ApprovalStatus   @default(DRAFT)
+  approvedBy        String?
+  approvedAt        DateTime?
+  suspended         Boolean          @default(false)
+  createdAt         DateTime         @default(now())
+  updatedAt         DateTime         @updatedAt
+
+  campaign          ContentCampaign           @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theme             CampaignTheme             @relation(fields: [themeId], references: [id], onDelete: Cascade)
+  destination       LinkedinDestination       @relation(fields: [destinationId], references: [id])
+  versions          GeneratedPostVersion[]
+  approvals         ContentApproval[]
+  validationResults ContentValidationResult[]
+  generationRuns    PostGenerationRun[]
+  publishingJob     PublishingJob?
+
+  @@unique([themeId, destinationId])
+  @@index([campaignId])
+  @@index([destinationId])
+}
+
+model GeneratedPostVersion {
+  id              String   @id @default(uuid())
+  generatedPostId String
+  copyVersion     Int
+  postText        String
+  contentHash     String
+  changeReason    String?
+  changedBy       String   @default("admin")
+  createdAt       DateTime @default(now())
+
+  generatedPost GeneratedPost @relation(fields: [generatedPostId], references: [id], onDelete: Cascade)
+
+  @@unique([generatedPostId, copyVersion])
+}
+
+model PostGenerationRun {
+  id                String              @id @default(uuid())
+  campaignId        String
+  themeId           String?
+  generatedPostId   String?
+  runType           GenerationRunType
+  model             String
+  promptVersion     String
+  configVersion     String?
+  requestSummary    Json
+  responseSummary   Json?
+  usageInputTokens  Int?
+  usageOutputTokens Int?
+  latencyMs         Int?
+  status            GenerationRunStatus
+  errorMessage      String?
+  createdAt         DateTime            @default(now())
+
+  campaign      ContentCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theme         CampaignTheme?  @relation(fields: [themeId], references: [id])
+  generatedPost GeneratedPost?  @relation(fields: [generatedPostId], references: [id])
+
+  @@index([campaignId])
+}
+
+model ContentApproval {
+  id              String         @id @default(uuid())
+  campaignId      String
+  themeId         String?
+  generatedPostId String?
+  level           ApprovalLevel
+  action          ApprovalAction
+  approver        String         @default("admin")
+  copyVersion     Int?
+  sourceVersion   Int?
+  notes           String?
+  createdAt       DateTime       @default(now())
+
+  campaign      ContentCampaign @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theme         CampaignTheme?  @relation(fields: [themeId], references: [id])
+  generatedPost GeneratedPost?  @relation(fields: [generatedPostId], references: [id])
+
+  @@index([campaignId])
+  @@index([generatedPostId])
+}
+
+model ContentValidationResult {
+  id              String                   @id @default(uuid())
+  campaignId      String?
+  campaignThemeId String?
+  generatedPostId String?
+  checkCode       ValidationCheckCode
+  passed          Boolean
+  reasonCode      ValidationFailureReason?
+  message         String?
+  details         Json?
+  createdAt       DateTime                 @default(now())
+
+  campaign      ContentCampaign? @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theme         CampaignTheme?   @relation(fields: [campaignThemeId], references: [id])
+  generatedPost GeneratedPost?   @relation(fields: [generatedPostId], references: [id])
+
+  @@index([generatedPostId])
+  @@index([campaignThemeId])
+}
+
+// The literal handoff table (spec section 14): each row's fields map 1:1
+// onto the required publishing-job JSON contract between the two agents.
+model PublishingJob {
+  id                  String                  @id @default(uuid())
+  idempotencyKey      String                  @unique
+  campaignId          String
+  themeId             String
+  generatedPostId     String                  @unique
+  copyVersion         Int
+  destinationId       String
+  destinationType     LinkedinDestinationType
+  linkedinReference   String?
+  publishingMode      PublishingMode
+  status              PublishingJobStatus     @default(QUEUED)
+  publishDate         DateTime
+  earliestPublishAt   DateTime
+  latestPublishAt     DateTime
+  timezone            String
+  sequence            Int                     @default(0)
+  contentTextSnapshot String
+  canonicalUrl        String?
+  publishedUrl        String?
+  mediaAssetId        String?
+  contentHash         String
+  postType            PostType
+  topicId             String?
+  assetId             String?
+  sourceVersion       Int?
+  approvedBy          String?
+  approvedAt          DateTime?
+  confirmedBy         String?
+  confirmedAt         DateTime?
+  blockReason         String?
+  skipReason          String?
+  cancelReason        String?
+  createdAt           DateTime                @default(now())
+  updatedAt           DateTime                @updatedAt
+
+  campaign      ContentCampaign      @relation(fields: [campaignId], references: [id], onDelete: Cascade)
+  theme         CampaignTheme        @relation(fields: [themeId], references: [id])
+  generatedPost GeneratedPost        @relation(fields: [generatedPostId], references: [id])
+  destination   LinkedinDestination  @relation(fields: [destinationId], references: [id])
+  attempts      PublicationAttempt[]
+  publishedPost PublishedPost?
+
+  @@index([status])
+  @@index([campaignId])
+  @@index([destinationId, status])
+  @@index([publishDate])
+}
+
+model PublicationAttempt {
+  id              String                   @id @default(uuid())
+  publishingJobId String
+  attemptNumber   Int
+  action          PublicationAttemptAction
+  result          PublicationAttemptResult
+  actor           String                   @default("admin")
+  details         Json?
+  createdAt       DateTime                 @default(now())
+
+  publishingJob PublishingJob @relation(fields: [publishingJobId], references: [id], onDelete: Cascade)
+
+  @@index([publishingJobId])
+}
+
+model PublishedPost {
+  id               String           @id @default(uuid())
+  publishingJobId  String           @unique
+  destinationId    String
+  postUrl          String
+  publishedAt      DateTime         @default(now())
+  recordedBy       String           @default("admin")
+  moderationStatus ModerationStatus @default(NONE)
+  notes            String?
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  publishingJob PublishingJob       @relation(fields: [publishingJobId], references: [id], onDelete: Cascade)
+  destination   LinkedinDestination @relation(fields: [destinationId], references: [id])
+}
+
+// Singleton row (id="global"), owned by the Publishing Agent side:
+// global/category pause switches (spec section 7.11).
+model PublishingControl {
+  id             String   @id @default("global")
+  pauseAll       Boolean  @default(false)
+  pausePersonal  Boolean  @default(false)
+  pauseCompany   Boolean  @default(false)
+  pauseAllGroups Boolean  @default(false)
+  updatedAt      DateTime @updatedAt
+  updatedBy      String?
+}
+
+// Singleton row (id="global"), owned by the Generation Agent side:
+// admin-editable char limit + similarity/reuse thresholds.
+model PlatformConfig {
+  id                    String   @id @default("global")
+  linkedinCharLimit     Int      @default(3000)
+  similarityThreshold   Float    @default(0.82)
+  duplicateLookbackDays Int      @default(90)
+  reuseCooldownDays     Int      @default(30)
+  updatedAt             DateTime @updatedAt
+  updatedBy             String?
 }

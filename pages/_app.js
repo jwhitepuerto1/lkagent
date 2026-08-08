@@ -66,6 +66,7 @@ export default function App({ Component, pageProps }) {
             <Link href="/" style={{ fontWeight: 700 }}>IAS</Link>
             <Link href="/leads">Leads</Link>
             <Link href="/tasks">Tasks</Link>
+            <Link href="/linkedin">LinkedIn</Link>
           </div>
           {authed ? (
             <button onClick={logout} style={{ padding: "8px 10px" }}>Logout</button>
