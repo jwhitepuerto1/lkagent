@@ -41,3 +41,9 @@ yarn-error.log*
 next-env.d.ts
 
 /generated/prisma
+
+# local Claude Code settings - personal permission grants, not shared config
+.claude/settings.local.json
+
+# separate nested project, not part of this repo
+/_new-repo-ias-iam/
