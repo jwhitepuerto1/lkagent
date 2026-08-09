@@ -30,6 +30,9 @@ export default function Sidebar() {
         <Link href="/analytics">Analytics</Link>
         <Link href="/linkedin">LinkedIn Agent</Link>
         <Link href="/linkedin-engagement">LinkedIn Engagement</Link>
+        <Link href="/linkedin-engagement/queues">Daily Queues</Link>
+        <Link href="/linkedin-engagement/comments">Comment Tracking</Link>
+        <Link href="/linkedin-engagement/promote">Promote / Export</Link>
       </nav>
     </aside>
   );

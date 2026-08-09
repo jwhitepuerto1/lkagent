@@ -777,9 +777,9 @@ model EngagementPost {
 }
 
 model EngagementProfile {
-  id            String             @id @default(uuid())
-  linkedinUrn   String             @unique
-  publicUrl     String?            @unique
+  id            String    @id @default(uuid())
+  linkedinUrn   String    @unique
+  publicUrl     String?   @unique
   fullName      String?
   headline      String?
   companyName   String?
@@ -788,9 +788,172 @@ model EngagementProfile {
   connectionDeg String?
   enrichedAt    DateTime?
   raw           Json?
-  engagements   EngagementRecord[]
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+
+  // Outreach intelligence (Capital Context LinkedIn Engagement, Outreach
+  // Intelligence, and CRE Prospect Promotion Agent spec, sections 7.4-7.10).
+  // This one record IS the canonical person - no parallel Person/Prospect
+  // model, per the spec's own "one identity, don't fragment" rule.
+  primaryCategory          PersonCategory?
+  secondaryCategories      Json? // PersonCategory[] as strings
+  classificationConfidence Float?
+  classificationEvidence   Json? // string[] of reasons
+  classificationOverridden Boolean         @default(false)
+  fitScore                 Int?
+  engagementScore          Int?
+  priorityScore            Int?
+  scoreFactors             Json? // contributing factors, for explainability (spec 7.5.D)
+  scoreCalculatedAt        DateTime?
+  status                   PersonStatus    @default(LINKEDIN_LEAD)
+  lastInboundAt            DateTime? // reply, accepted invite, comment reply
+  lastOutboundAt           DateTime? // DM sent, invite sent, comment posted (manual, logged by John)
+  nextActionDue            DateTime?
+  nextActionReason         String?
+  noResponseCount          Int             @default(0)
+  suppressed               Boolean         @default(false)
+  suppressedReason         String?
+  promotedAt               DateTime?
+  promotedBy               String?
+  promotionReason          String?
+  promotionExportId        String?
+
+  engagements     EngagementRecord[]
+  invites         OutreachInvite[]
+  conversations   OutreachConversation[]
+  commentReplies  OutreachCommentReply[]
+  promotionExport PromotionExport?       @relation(fields: [promotionExportId], references: [id])
+  createdAt       DateTime               @default(now())
+  updatedAt       DateTime               @updatedAt
+
+  @@index([status])
+  @@index([primaryCategory])
+}
+
+// Spec section 7.4 - 12 required categories.
+enum PersonCategory {
+  CRE_SPONSOR_DEVELOPER
+  REAL_ESTATE_FUND_MANAGER
+  REAL_ESTATE_SYNDICATOR
+  CRE_OPERATOR
+  CAPITAL_RAISING_ADVISOR
+  SECURITIES_OR_RE_ATTORNEY
+  CPA_TAX_ADVISOR
+  INVESTOR_CONTACT
+  CRE_SERVICE_PROVIDER
+  INDUSTRY_PUBLICATION_OR_INFLUENCER
+  UNRELATED_LOW_RELEVANCE
+  UNCLEAR_REVIEW_REQUIRED
+}
+
+// Trimmed to the LinkedIn-side lifecycle this agent actually owns (spec
+// section 9) - everything from "Selected for Enrichment" onward belongs to
+// the separate ias_cre_agent module this agent hands off a CSV to.
+enum PersonStatus {
+  LINKEDIN_LEAD
+  ENGAGEMENT_REVIEW
+  CONVERSATION_ACTIVE
+  FOLLOW_UP_DUE
+  WATCHLIST
+  PROMOTED
+  IRRELEVANT
+  SUPPRESSED
+}
+
+enum InviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED_OR_WITHDRAWN
+}
+
+// Discovered via polling /users/invite/sent (spec-confirmed: this endpoint
+// only lists PENDING invitations - acceptance is inferred when a
+// previously-seen invite disappears from this list, then confirmed via a
+// profile lookup's network_distance field, per Unipile's own documented
+// "Detecting Accepted Invitations" guidance).
+model OutreachInvite {
+  id                  String       @id @default(uuid())
+  profileId           String
+  unipileInvitationId String       @unique
+  invitationText      String?
+  status              InviteStatus @default(PENDING)
+  sentAt              DateTime?
+  firstSeenAt         DateTime     @default(now())
+  resolvedAt          DateTime?
+  lastCheckedAt       DateTime     @default(now())
+
+  profile EngagementProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([status])
+}
+
+// One row per Unipile chat with a first-degree connection. Direction is
+// read from each message's confirmed `is_sender` field (1 = John sent it).
+model OutreachConversation {
+  id                 String    @id @default(uuid())
+  profileId          String
+  unipileChatId      String    @unique
+  lastOutboundAt     DateTime?
+  lastInboundAt      DateTime?
+  lastMessageSnippet String?
+  awaitingReply      Boolean   @default(false) // John sent the last message, no reply yet
+  requiresMyResponse Boolean   @default(false) // they replied since John's last message
+  lastCheckedAt      DateTime  @default(now())
+  createdAt          DateTime  @default(now())
+  updatedAt          DateTime  @updatedAt
+
+  profile EngagementProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@index([profileId])
+  @@index([requiresMyResponse])
+}
+
+// No Unipile endpoint discovers "posts John commented on" - John logs the
+// post URL and the exact text of his own comment manually; the agent then
+// polls that post's comment list for anyone else's comment appearing after
+// his. This is a documented approximation, not true parent-comment
+// threading, since Unipile does not expose an explicit reply-to-comment
+// field for LinkedIn.
+model OutreachComment {
+  id             String    @id @default(uuid())
+  postUrl        String
+  postSocialId   String? // resolved on first successful check
+  myCommentText  String
+  myCommentAt    DateTime?
+  postAuthorName String?
+  status         String    @default("WATCHING") // WATCHING | REPLIED | NO_REPLY_YET
+  loggedAt       DateTime  @default(now())
+  lastCheckedAt  DateTime  @default(now())
+
+  replies OutreachCommentReply[]
+}
+
+model OutreachCommentReply {
+  id                String   @id @default(uuid())
+  outreachCommentId String
+  profileId         String?
+  unipileCommentId  String   @unique
+  replierName       String?
+  replyText         String
+  repliedAt         DateTime
+  discoveredAt      DateTime @default(now())
+
+  outreachComment OutreachComment    @relation(fields: [outreachCommentId], references: [id], onDelete: Cascade)
+  profile         EngagementProfile? @relation(fields: [profileId], references: [id])
+
+  @@index([outreachCommentId])
+}
+
+// One row per CSV file exported for manual hand-off into ias_cre_agent
+// (C:\Users\jwhit\IAspecmodule\ias_cre_agent) - John submits the file there
+// himself; this agent never talks to that module directly.
+model PromotionExport {
+  id          String   @id @default(uuid())
+  fileName    String
+  recordCount Int
+  exportedBy  String   @default("admin")
+  exportedAt  DateTime @default(now())
+
+  profiles EngagementProfile[]
 }
 
 model EngagementRecord {
