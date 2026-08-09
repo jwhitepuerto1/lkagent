@@ -29,6 +29,7 @@ export default function Sidebar() {
         <Link href="/campaigns">Campaigns</Link>
         <Link href="/analytics">Analytics</Link>
         <Link href="/linkedin">LinkedIn Agent</Link>
+        <Link href="/linkedin-engagement">LinkedIn Engagement</Link>
       </nav>
     </aside>
   );

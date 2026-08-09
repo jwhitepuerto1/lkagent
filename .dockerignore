@@ -1,0 +1,9 @@
+node_modules
+.next
+.git
+.env*
+_new-repo-ias-iam
+docs
+n8n
+*.md
+.claude

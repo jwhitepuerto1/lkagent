@@ -1,0 +1,110 @@
+{
+  "name": "LinkedIn Engagement - Daily Ingestion",
+  "nodes": [
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 7 * * *"
+            }
+          ]
+        }
+      },
+      "id": "schedule-trigger",
+      "name": "Daily 07:00",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 300]
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IAS_BASE_URL }}/api/linkedin-engagement/run",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ingest-secret",
+              "value": "={{ $env.LINKEDIN_ENGAGEMENT_INGEST_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 120000
+        }
+      },
+      "id": "trigger-ingestion",
+      "name": "Run Ingestion",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [480, 300],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.warnings.length }}",
+              "rightValue": 0,
+              "operator": {
+                "type": "number",
+                "operation": "gt"
+              }
+            }
+          ],
+          "combinator": "and"
+        }
+      },
+      "id": "check-warnings",
+      "name": "Had Warnings?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [720, 300]
+    }
+  ],
+  "connections": {
+    "Daily 07:00": {
+      "main": [
+        [
+          {
+            "node": "Run Ingestion",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Run Ingestion": {
+      "main": [
+        [
+          {
+            "node": "Had Warnings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "meta": {
+    "notes": "Thin trigger by design: all Unipile calls, source detection, normalization, and idempotent DB writes live in the tested Next.js code at lib/linkedinEngagement/** and pages/api/linkedin-engagement/run.js, not in this workflow. This node just calls that endpoint on a schedule and retries transient failures - it does not duplicate business logic that couldn't be verified/tested inside n8n itself. Wire the 'Had Warnings?' true branch to a notification node (Slack/email) of your choice if you want alerts; none is included here since no notification channel was specified. Requires IAS_BASE_URL and LINKEDIN_ENGAGEMENT_INGEST_SECRET set as n8n environment variables (Settings > Environments, or your n8n host's env config) - do not paste the secret directly into this JSON."
+  }
+}

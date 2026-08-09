@@ -737,3 +737,88 @@ model PlatformConfig {
   updatedAt             DateTime @updatedAt
   updatedBy             String?
 }
+
+/**
+ * LinkedIn Engagement Tracking Agent (Phase 1: ingestion only)
+ * - Pulls likes/comments on the connected LinkedIn account's posts via
+ * Unipile and writes normalized Post/Profile/Engagement rows here.
+ * - Profile rows start as stubs (URN + public URL only); full enrichment
+ * (name/headline/company) is an explicitly deferred Phase 2, not built yet.
+ * - Ids use uuid() rather than the spec's cuid() to match this schema's
+ * existing convention for every other model.
+ */
+enum PostSource {
+  PERSONAL
+  GROUP
+}
+
+enum EngagementType {
+  LIKE
+  COMMENT
+  REACTION_OTHER
+}
+
+model EngagementPost {
+  id              String             @id @default(uuid())
+  linkedinUrn     String             @unique
+  source          PostSource
+  // GROUP detection could not be verified against a live Unipile payload at
+  // build time (no credentials provisioned yet) - see
+  // lib/linkedinEngagement/detectSource.js. This flag records whether the
+  // source above is a confident field-based detection or an unverified
+  // default, so a human can review ambiguous rows later.
+  sourceConfident Boolean            @default(true)
+  postedAt        DateTime
+  url             String
+  textSnippet     String?
+  engagements     EngagementRecord[]
+  createdAt       DateTime           @default(now())
+  updatedAt       DateTime           @updatedAt
+}
+
+model EngagementProfile {
+  id            String             @id @default(uuid())
+  linkedinUrn   String             @unique
+  publicUrl     String?            @unique
+  fullName      String?
+  headline      String?
+  companyName   String?
+  companyUrl    String?
+  location      String?
+  connectionDeg String?
+  enrichedAt    DateTime?
+  raw           Json?
+  engagements   EngagementRecord[]
+  createdAt     DateTime           @default(now())
+  updatedAt     DateTime           @updatedAt
+}
+
+model EngagementRecord {
+  id           String         @id @default(uuid())
+  postId       String
+  profileId    String
+  type         EngagementType
+  // Non-null with an empty-string default (never actual NULL) so the
+  // @@unique below actually dedupes LIKE/REACTION_OTHER rows across runs -
+  // Postgres treats every NULL as distinct from every other NULL, which
+  // would otherwise defeat idempotency for non-comment engagement types.
+  commentText  String         @default("")
+  reactedAt    DateTime
+  discoveredAt DateTime       @default(now())
+
+  post    EngagementPost    @relation(fields: [postId], references: [id], onDelete: Cascade)
+  profile EngagementProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+
+  @@unique([postId, profileId, type, commentText])
+  @@index([postId])
+  @@index([profileId])
+}
+
+model EngagementSyncRun {
+  id             String    @id @default(uuid())
+  startedAt      DateTime  @default(now())
+  finishedAt     DateTime?
+  postsScanned   Int?
+  newEngagements Int?
+  errorMessage   String?
+}

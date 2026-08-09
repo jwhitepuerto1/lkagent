@@ -1,0 +1,13 @@
+services:
+  ias-v1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: production
+      # Elestio injects the rest (DATABASE_URL, AUTH_SECRET, AUTH_PASSWORD,
+      # ANTHROPIC_API_KEY, UNIPILE_*, LINKEDIN_ENGAGEMENT_INGEST_SECRET) via
+      # its own Environment Variables panel - do not hardcode secrets here.
+    restart: unless-stopped
