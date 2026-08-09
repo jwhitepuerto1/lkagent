@@ -50,6 +50,43 @@
     },
     {
       "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IAS_BASE_URL }}/api/linkedin-engagement/classify",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ingest-secret",
+              "value": "={{ $env.LINKEDIN_ENGAGEMENT_INGEST_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            { "name": "forceAll", "value": false }
+          ]
+        },
+        "options": {
+          "timeout": 300000
+        }
+      },
+      "id": "classify-profiles",
+      "name": "Classify New Profiles",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 300],
+      "retryOnFail": true,
+      "maxTries": 2,
+      "waitBetweenTries": 30000,
+      "notes": "Batch-classifies only unscored profiles (forceAll=false), so this stays cheap on days with little new engagement. Long timeout (5 min) because it's a sequential LLM call per unscored profile, not a single fast request - a big backlog after downtime can take a while."
+    },
+    {
+      "parameters": {
         "conditions": {
           "options": {
             "caseSensitive": true,
@@ -73,7 +110,67 @@
       "name": "Had Warnings?",
       "type": "n8n-nodes-base.if",
       "typeVersion": 2,
-      "position": [720, 300]
+      "position": [960, 300]
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "cronExpression",
+              "expression": "0 9,13,17 * * *"
+            }
+          ]
+        }
+      },
+      "id": "invite-dm-check-trigger",
+      "name": "Invite/DM Check Times",
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [240, 520],
+      "notes": "Three fixed anchor times (09:00/13:00/17:00) feeding into a random-jitter Wait node below - n8n's Schedule Trigger has no native random-interval mode, so the jitter is added as a separate step rather than faked with a misleadingly 'random-looking' cron expression."
+    },
+    {
+      "parameters": {
+        "amount": "={{ Math.floor(Math.random() * 2700) }}",
+        "unit": "seconds"
+      },
+      "id": "jitter-wait",
+      "name": "Random Jitter (0-45min)",
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [480, 520],
+      "notes": "Unipile's own 'Detecting Accepted Invitations' guidance: space invite/connection checks out with random delay, not a fixed time, to avoid LinkedIn's automation detection. This is why sync-outreach is on its own trigger with jitter, not just added to the 07:00 ingestion run."
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "={{ $env.IAS_BASE_URL }}/api/linkedin-engagement/sync-outreach",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "x-ingest-secret",
+              "value": "={{ $env.LINKEDIN_ENGAGEMENT_INGEST_SECRET }}"
+            },
+            {
+              "name": "content-type",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 180000
+        }
+      },
+      "id": "sync-outreach",
+      "name": "Sync Outreach (Invites + DMs)",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [720, 520],
+      "retryOnFail": true,
+      "maxTries": 3,
+      "waitBetweenTries": 30000
     }
   ],
   "connections": {
@@ -92,7 +189,40 @@
       "main": [
         [
           {
+            "node": "Classify New Profiles",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Classify New Profiles": {
+      "main": [
+        [
+          {
             "node": "Had Warnings?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Invite/DM Check Times": {
+      "main": [
+        [
+          {
+            "node": "Random Jitter (0-45min)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Random Jitter (0-45min)": {
+      "main": [
+        [
+          {
+            "node": "Sync Outreach (Invites + DMs)",
             "type": "main",
             "index": 0
           }
@@ -105,6 +235,6 @@
     "executionOrder": "v1"
   },
   "meta": {
-    "notes": "Thin trigger by design: all Unipile calls, source detection, normalization, and idempotent DB writes live in the tested Next.js code at lib/linkedinEngagement/** and pages/api/linkedin-engagement/run.js, not in this workflow. This node just calls that endpoint on a schedule and retries transient failures - it does not duplicate business logic that couldn't be verified/tested inside n8n itself. Wire the 'Had Warnings?' true branch to a notification node (Slack/email) of your choice if you want alerts; none is included here since no notification channel was specified. Requires IAS_BASE_URL and LINKEDIN_ENGAGEMENT_INGEST_SECRET set as n8n environment variables (Settings > Environments, or your n8n host's env config) - do not paste the secret directly into this JSON."
+    "notes": "Two independent schedules in one workflow. (1) Daily 07:00 -> Run Ingestion -> Classify New Profiles -> Had Warnings?: post/reaction/comment sync followed by classifying whatever's newly unscored, once a day, no timing sensitivity since neither call is a LinkedIn write action. (2) Invite/DM Check Times (09:00/13:00/17:00) -> Random Jitter (0-45min) -> Sync Outreach: three anchor times per Unipile's own recommendation ('a few times a day'), each with an independent random 0-45min delay so the actual request time never lands on a predictable schedule. All business logic (Unipile calls, field extraction, idempotent DB writes, classification) lives in this repo's tested code, not in this workflow - these nodes only schedule, jitter, and retry. Wire the 'Had Warnings?' true branch to a notification node of your choice; none is included since no channel was specified. Requires IAS_BASE_URL and LINKEDIN_ENGAGEMENT_INGEST_SECRET as n8n environment variables - never paste the secret directly into this JSON."
   }
 }
