@@ -125,7 +125,7 @@ export default function LinkedInEngagementPage() {
       <h1>LinkedIn Engagement</h1>
       <p style={{ fontSize: 13, opacity: 0.75 }}>
         Who liked and commented on each post, pulled daily via Unipile. Needs UNIPILE_API_KEY/DSN/ACCOUNT_ID
-        configured before "Run now" will find real data.
+        configured before &ldquo;Run now&rdquo; will find real data.
       </p>
 
       <button style={btn} disabled={running} onClick={runNow}>

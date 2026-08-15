@@ -33,6 +33,7 @@ export default function Sidebar() {
         <Link href="/linkedin-engagement/queues">Daily Queues</Link>
         <Link href="/linkedin-engagement/comments">Comment Tracking</Link>
         <Link href="/linkedin-engagement/promote">Promote / Export</Link>
+        <Link href="/linkedin-engagement/quick-export">Quick Export</Link>
       </nav>
     </aside>
   );

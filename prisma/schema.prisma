@@ -762,11 +762,10 @@ model EngagementPost {
   id              String             @id @default(uuid())
   linkedinUrn     String             @unique
   source          PostSource
-  // GROUP detection could not be verified against a live Unipile payload at
-  // build time (no credentials provisioned yet) - see
-  // lib/linkedinEngagement/detectSource.js. This flag records whether the
-  // source above is a confident field-based detection or an unverified
-  // default, so a human can review ambiguous rows later.
+  // GROUP detection IS confirmed against a live Unipile payload (2026-08-09)
+  // - see lib/linkedinEngagement/detectSource.js. This flag exists for the
+  // general case of a confident field-based detection vs. an unverified
+  // default, so a human can review ambiguous rows later if that ever arises.
   sourceConfident Boolean            @default(true)
   postedAt        DateTime
   url             String
