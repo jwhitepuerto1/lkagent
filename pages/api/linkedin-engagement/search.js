@@ -24,7 +24,8 @@ export default async function handler(req, res) {
     if (!keywords) return res.status(400).json({ error: "keywords is required" });
 
     const limit = Number(req.body?.limit) || 20;
-    const rawItems = await searchPeople({ keywords, limit });
+    const api = req.body?.api === "sales_navigator" ? "sales_navigator" : "classic";
+    const rawItems = await searchPeople({ keywords, limit, api });
     const items = rawItems.map(normalizeSearchResult).filter(Boolean);
     return res.status(200).json({ items });
   } catch (err) {

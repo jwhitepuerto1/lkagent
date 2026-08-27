@@ -13,6 +13,7 @@ const btn = { padding: "8px 14px", marginRight: 8 };
 
 export default function SearchImportPage() {
   const [keywords, setKeywords] = useState("");
+  const [api, setApi] = useState("sales_navigator");
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Map()); // linkedinUrn -> profile, across all searches
   const [searching, setSearching] = useState(false);
@@ -28,7 +29,7 @@ export default function SearchImportPage() {
       const res = await fetch("/api/linkedin-engagement/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: keywords.trim(), limit: 20 }),
+        body: JSON.stringify({ keywords: keywords.trim(), limit: 20, api }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Search failed");
@@ -95,7 +96,10 @@ export default function SearchImportPage() {
         One-off LinkedIn people search (1st-degree connections only), for a handful of keyword
         searches you run once and export - not a daily sync, and nothing here is saved to the
         database until you download the CSV. Run as many searches as you need; selections carry
-        over between them, so you can build one CSV across all of them.
+        over between them, so you can build one CSV across all of them. Sales Navigator caps a
+        single search at 2,500 results (Classic caps at 1,000) - LinkedIn&apos;s own per-query
+        limit, not a daily one - so keep each search narrow (a specific keyword/segment) rather
+        than one broad query, per Unipile&apos;s own guidance.
       </p>
 
       <form onSubmit={runSearch} style={{ margin: "10px 0" }}>
@@ -106,6 +110,10 @@ export default function SearchImportPage() {
           placeholder="e.g. real estate sponsor"
           style={{ padding: 8, width: 320, marginRight: 8 }}
         />
+        <select value={api} onChange={(e) => setApi(e.target.value)} style={{ padding: 8, marginRight: 8 }}>
+          <option value="sales_navigator">Sales Navigator</option>
+          <option value="classic">Classic</option>
+        </select>
         <button type="submit" style={btn} disabled={searching || !keywords.trim()}>
           {searching ? "Searching…" : "Search"}
         </button>
