@@ -1,11 +1,18 @@
 // pages/linkedin-engagement/search-import.js
-// One-off tool: run a LinkedIn people search (1st-degree connections only),
-// select results across as many searches as needed, then export everything
-// selected as one CSV in the ias_cre_agent format. Nothing here is written
-// to the database - selections live only in this page's state until
-// exported (see search.js / search-export.js). Not part of the daily
-// pipeline; John's use case is a handful of one-time keyword searches
-// (e.g. "real estate sponsor"), not a recurring sync.
+// One-off tool: run a LinkedIn people search, select results across as many
+// searches as needed, then export everything selected as one CSV in the
+// ias_cre_agent format. Nothing here is written to the database - selections
+// live only in this page's state until exported (see search.js /
+// search-export.js). Not part of the daily pipeline; John's use case is a
+// handful of one-time keyword searches (e.g. "real estate sponsor"), not a
+// recurring sync.
+//
+// Connection-degree defaults to 1st-only (the original scope) - broadening
+// to 2nd/3rd is a deliberate opt-in, confirmed useful (2026-08-27) after a
+// 1st-degree-only search on a narrow keyword legitimately returned as few as
+// 16 real matches (Unipile's own paging.total_count confirmed it wasn't
+// truncated). 2nd/3rd-degree results need an invite before they can be
+// DMed - 1st-degree ones don't - so each result's degree is shown.
 import { useState } from "react";
 import Layout from "../../components/Layout";
 
@@ -14,6 +21,7 @@ const btn = { padding: "8px 14px", marginRight: 8 };
 export default function SearchImportPage() {
   const [keywords, setKeywords] = useState("");
   const [api, setApi] = useState("sales_navigator");
+  const [degrees, setDegrees] = useState({ 1: true, 2: false, 3: false });
   const [results, setResults] = useState([]);
   const [selected, setSelected] = useState(new Map()); // linkedinUrn -> profile, across all searches
   const [searching, setSearching] = useState(false);
@@ -26,10 +34,13 @@ export default function SearchImportPage() {
     setSearching(true);
     setError("");
     try {
+      const networkDistance = Object.entries(degrees)
+        .filter(([, checked]) => checked)
+        .map(([degree]) => Number(degree));
       const res = await fetch("/api/linkedin-engagement/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: keywords.trim(), limit: 20, api }),
+        body: JSON.stringify({ keywords: keywords.trim(), limit: 20, api, networkDistance }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Search failed");
@@ -93,13 +104,19 @@ export default function SearchImportPage() {
     <Layout>
       <h1>Search Import</h1>
       <p style={{ fontSize: 13, opacity: 0.75, maxWidth: 720 }}>
-        One-off LinkedIn people search (1st-degree connections only), for a handful of keyword
-        searches you run once and export - not a daily sync, and nothing here is saved to the
-        database until you download the CSV. Run as many searches as you need; selections carry
-        over between them, so you can build one CSV across all of them. Sales Navigator caps a
-        single search at 2,500 results (Classic caps at 1,000) - LinkedIn&apos;s own per-query
-        limit, not a daily one - so keep each search narrow (a specific keyword/segment) rather
-        than one broad query, per Unipile&apos;s own guidance.
+        One-off LinkedIn people search, for a handful of keyword searches you run once and
+        export - not a daily sync, and nothing here is saved to the database until you download
+        the CSV. Run as many searches as you need; selections carry over between them, so you can
+        build one CSV across all of them. Sales Navigator caps a single search at 2,500 results
+        (Classic caps at 1,000) - LinkedIn&apos;s own per-query limit, not a daily one - so keep
+        each search narrow (a specific keyword/segment) rather than one broad query, per
+        Unipile&apos;s own guidance.
+      </p>
+      <p style={{ fontSize: 13, opacity: 0.75, maxWidth: 720 }}>
+        Defaults to 1st-degree connections only. Widening to 2nd/3rd-degree searches beyond your
+        existing network - normal for Sales Navigator prospecting - but those people need a
+        connection invite before you can DM them; 1st-degree ones don&apos;t. Each result below
+        shows its degree so you know which applies.
       </p>
 
       <form onSubmit={runSearch} style={{ margin: "10px 0" }}>
@@ -117,6 +134,20 @@ export default function SearchImportPage() {
         <button type="submit" style={btn} disabled={searching || !keywords.trim()}>
           {searching ? "Searching…" : "Search"}
         </button>
+
+        <div style={{ marginTop: 10, fontSize: 13 }}>
+          <span style={{ opacity: 0.75, marginRight: 8 }}>Connection degree:</span>
+          {[1, 2, 3].map((degree) => (
+            <label key={degree} style={{ marginRight: 14 }}>
+              <input
+                type="checkbox"
+                checked={degrees[degree]}
+                onChange={(e) => setDegrees((prev) => ({ ...prev, [degree]: e.target.checked }))}
+              />{" "}
+              {degree === 1 ? "1st" : degree === 2 ? "2nd" : "3rd"}
+            </label>
+          ))}
+        </div>
       </form>
 
       {error ? <p style={{ color: "crimson" }}>{error}</p> : null}
@@ -138,7 +169,12 @@ export default function SearchImportPage() {
               >
                 <input type="checkbox" checked={selected.has(p.linkedinUrn)} onChange={() => toggle(p)} />
                 <div>
-                  <strong>{p.fullName || p.linkedinUrn}</strong>
+                  <strong>{p.fullName || p.linkedinUrn}</strong>{" "}
+                  {p.networkDistance ? (
+                    <span style={{ fontSize: 11, opacity: 0.6, border: "1px solid #ccc", borderRadius: 4, padding: "1px 5px" }}>
+                      {p.networkDistance}
+                    </span>
+                  ) : null}
                   <div style={{ fontSize: 12, opacity: 0.6 }}>
                     {p.headline} {p.location ? `• ${p.location}` : ""}
                   </div>
