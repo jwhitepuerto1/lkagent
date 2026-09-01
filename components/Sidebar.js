@@ -1,5 +1,10 @@
 import Link from "next/link";
 
+// Link has no color of its own, so it falls back to the browser's default
+// anchor colors (blue/purple) instead of inheriting the aside's white text -
+// unreadable against the dark background without this.
+const navLink = { color: "#fff" };
+
 export default function Sidebar() {
   return (
     <aside
@@ -23,18 +28,18 @@ export default function Sidebar() {
           gap: "0.75rem",
         }}
       >
-        <Link href="/dashboard">Dashboard</Link>
-        <Link href="/leads">Leads</Link>
-        <Link href="/tasks">Tasks</Link>
-        <Link href="/campaigns">Campaigns</Link>
-        <Link href="/analytics">Analytics</Link>
-        <Link href="/linkedin">LinkedIn Agent</Link>
-        <Link href="/linkedin-engagement">LinkedIn Engagement</Link>
-        <Link href="/linkedin-engagement/queues">Daily Queues</Link>
-        <Link href="/linkedin-engagement/comments">Comment Tracking</Link>
-        <Link href="/linkedin-engagement/promote">Promote / Export</Link>
-        <Link href="/linkedin-engagement/quick-export">Quick Export</Link>
-        <Link href="/linkedin-engagement/search-import">Search Import</Link>
+        <Link href="/dashboard" style={navLink}>Dashboard</Link>
+        <Link href="/leads" style={navLink}>Leads</Link>
+        <Link href="/tasks" style={navLink}>Tasks</Link>
+        <Link href="/campaigns" style={navLink}>Campaigns</Link>
+        <Link href="/analytics" style={navLink}>Analytics</Link>
+        <Link href="/linkedin" style={navLink}>LinkedIn Agent</Link>
+        <Link href="/linkedin-engagement" style={navLink}>LinkedIn Engagement</Link>
+        <Link href="/linkedin-engagement/queues" style={navLink}>Daily Queues</Link>
+        <Link href="/linkedin-engagement/comments" style={navLink}>Comment Tracking</Link>
+        <Link href="/linkedin-engagement/promote" style={navLink}>Promote / Export</Link>
+        <Link href="/linkedin-engagement/quick-export" style={navLink}>Quick Export</Link>
+        <Link href="/linkedin-engagement/search-import" style={navLink}>Search Import</Link>
       </nav>
     </aside>
   );
