@@ -51,6 +51,67 @@ function PersonActions({ profile, onChanged }) {
   );
 }
 
+// Draft-only DM opener (spec 7.8 20/20/20 support). Generates suggested
+// text via Claude, nothing is ever sent from here - copy the text and send
+// it yourself in LinkedIn. See lib/linkedinEngagement/draftDm.js.
+function DraftDmButton({ profile }) {
+  const [drafting, setDrafting] = useState(false);
+  const [draftText, setDraftText] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [error, setError] = useState("");
+
+  async function draft() {
+    setDrafting(true);
+    setError("");
+    setCopied(false);
+    try {
+      const res = await fetch("/api/linkedin-engagement/draft-dm", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ profileId: profile.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || "Draft failed");
+      setDraftText(data.draftText);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setDrafting(false);
+    }
+  }
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(draftText);
+      setCopied(true);
+    } catch {
+      // clipboard access can fail silently in some browser contexts - the
+      // textarea below still lets John select/copy manually either way.
+    }
+  }
+
+  return (
+    <div style={{ marginTop: 6 }}>
+      <button style={btn} disabled={drafting} onClick={draft}>
+        {drafting ? "Drafting…" : draftText ? "Redraft" : "Draft DM"}
+      </button>
+      {error ? <span style={{ color: "crimson", fontSize: 12 }}>{error}</span> : null}
+      {draftText ? (
+        <div style={{ marginTop: 6 }}>
+          <textarea
+            readOnly
+            value={draftText}
+            rows={3}
+            style={{ width: "100%", fontSize: 13, padding: 6, boxSizing: "border-box" }}
+          />
+          <button style={btn} onClick={copy}>{copied ? "Copied" : "Copy"}</button>
+          <span style={{ fontSize: 11, opacity: 0.6 }}>Paste into LinkedIn yourself - nothing is sent automatically.</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 function Section({ title, items, empty, renderItem }) {
   return (
     <div style={{ marginBottom: 28 }}>
@@ -182,9 +243,9 @@ export default function QueuesPage() {
         )}
       />
 
-      <h2 style={{ marginTop: 32 }}>Today's 20/20/20 candidates</h2>
+      <h2 style={{ marginTop: 32 }}>Today&apos;s 20/20/20 candidates</h2>
       <p style={{ fontSize: 12, opacity: 0.7 }}>
-        "Posts worth commenting on" isn't included - no Unipile endpoint discovers other people's posts, so this
+        &ldquo;Posts worth commenting on&rdquo; isn&apos;t included - no Unipile endpoint discovers other people&apos;s posts, so this
         queue would have to be fabricated rather than derived from real data.
       </p>
 
@@ -210,6 +271,7 @@ export default function QueuesPage() {
             <div style={nameLine}>{p.fullName || p.linkedinUrn}</div>
             <div style={meta}>{p.headline}</div>
             <ScoreBadge profile={p} />
+            <DraftDmButton profile={p} />
           </div>
         )}
       />
