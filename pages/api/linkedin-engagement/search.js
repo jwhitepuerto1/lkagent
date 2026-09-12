@@ -21,7 +21,8 @@ export default async function handler(req, res) {
 
   try {
     const keywords = String(req.body?.keywords || "").trim();
-    if (!keywords) return res.status(400).json({ error: "keywords is required" });
+    const leadListId = String(req.body?.leadListId || "").trim();
+    if (!keywords && !leadListId) return res.status(400).json({ error: "keywords or leadListId is required" });
 
     const limit = Number(req.body?.limit) || 20;
     const api = req.body?.api === "sales_navigator" ? "sales_navigator" : "classic";
@@ -32,7 +33,13 @@ export default async function handler(req, res) {
       .filter((n) => [1, 2, 3].includes(n));
     if (networkDistance.length === 0) networkDistance.push(1); // default: 1st-degree only, as before
 
-    const rawItems = await searchPeople({ keywords, limit, api, networkDistance });
+    const rawItems = await searchPeople({
+      keywords: keywords || undefined,
+      limit,
+      api,
+      networkDistance,
+      leadListId: leadListId || undefined,
+    });
     const items = rawItems.map(normalizeSearchResult).filter(Boolean);
     return res.status(200).json({ items });
   } catch (err) {

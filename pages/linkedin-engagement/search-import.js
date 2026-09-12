@@ -19,6 +19,7 @@ import Layout from "../../components/Layout";
 const btn = { padding: "8px 14px", marginRight: 8 };
 
 export default function SearchImportPage() {
+  const [mode, setMode] = useState("keyword"); // "keyword" | "list"
   const [keywords, setKeywords] = useState("");
   const [api, setApi] = useState("sales_navigator");
   const [degrees, setDegrees] = useState({ 1: true, 2: false, 3: false });
@@ -28,19 +29,50 @@ export default function SearchImportPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
+  const [listQuery, setListQuery] = useState("");
+  const [listMatches, setListMatches] = useState([]);
+  const [selectedList, setSelectedList] = useState(null); // { id, title }
+  const [findingList, setFindingList] = useState(false);
+
+  async function findLists(e) {
+    e.preventDefault();
+    setFindingList(true);
+    setError("");
+    setSelectedList(null);
+    try {
+      const res = await fetch("/api/linkedin-engagement/search-lists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: listQuery.trim() }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || "List lookup failed");
+      setListMatches(data.lists);
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setFindingList(false);
+    }
+  }
+
   async function runSearch(e) {
     e.preventDefault();
-    if (!keywords.trim()) return;
+    if (mode === "keyword" && !keywords.trim()) return;
+    if (mode === "list" && !selectedList) return;
     setSearching(true);
     setError("");
     try {
       const networkDistance = Object.entries(degrees)
         .filter(([, checked]) => checked)
         .map(([degree]) => Number(degree));
+      const body =
+        mode === "list"
+          ? { leadListId: selectedList.id, limit: 100, networkDistance }
+          : { keywords: keywords.trim(), limit: 20, api, networkDistance };
       const res = await fetch("/api/linkedin-engagement/search", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ keywords: keywords.trim(), limit: 20, api, networkDistance }),
+        body: JSON.stringify(body),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message || data.error || "Search failed");
@@ -104,13 +136,13 @@ export default function SearchImportPage() {
     <Layout>
       <h1>Search Import</h1>
       <p style={{ fontSize: 13, opacity: 0.75, maxWidth: 720 }}>
-        One-off LinkedIn people search, for a handful of keyword searches you run once and
-        export - not a daily sync, and nothing here is saved to the database until you download
-        the CSV. Run as many searches as you need; selections carry over between them, so you can
-        build one CSV across all of them. Sales Navigator caps a single search at 2,500 results
+        Two ways to build a list here: run a fresh keyword search, or pull the members of a list
+        you already built in Sales Navigator. Either way it&apos;s one-off - not a daily sync, and
+        nothing here is saved to the database until you download the CSV. Run as many
+        searches/lists as you need; selections carry over between them, so you can build one CSV
+        across all of them. Sales Navigator caps a single keyword search at 2,500 results
         (Classic caps at 1,000) - LinkedIn&apos;s own per-query limit, not a daily one - so keep
-        each search narrow (a specific keyword/segment) rather than one broad query, per
-        Unipile&apos;s own guidance.
+        each keyword search narrow rather than one broad query, per Unipile&apos;s own guidance.
       </p>
       <p style={{ fontSize: 13, opacity: 0.75, maxWidth: 720 }}>
         Defaults to 1st-degree connections only. Widening to 2nd/3rd-degree searches beyond your
@@ -119,20 +151,72 @@ export default function SearchImportPage() {
         shows its degree so you know which applies.
       </p>
 
+      <div style={{ margin: "16px 0 6px", fontSize: 13 }}>
+        <label style={{ marginRight: 16 }}>
+          <input type="radio" checked={mode === "keyword"} onChange={() => setMode("keyword")} /> Keyword search
+        </label>
+        <label>
+          <input type="radio" checked={mode === "list"} onChange={() => setMode("list")} /> Export a saved Sales Navigator list
+        </label>
+      </div>
+
+      {mode === "list" ? (
+        <form onSubmit={findLists} style={{ margin: "10px 0" }}>
+          <input
+            type="text"
+            value={listQuery}
+            onChange={(e) => setListQuery(e.target.value)}
+            placeholder="List name (leave blank to see all your lists)"
+            style={{ padding: 8, width: 320, marginRight: 8 }}
+          />
+          <button type="submit" style={btn} disabled={findingList}>
+            {findingList ? "Looking…" : "Find list"}
+          </button>
+
+          {listMatches.length > 0 ? (
+            <div style={{ marginTop: 10, display: "grid", gap: 4 }}>
+              {listMatches.map((l) => (
+                <label key={l.id} style={{ fontSize: 13 }}>
+                  <input
+                    type="radio"
+                    name="selectedList"
+                    checked={selectedList?.id === l.id}
+                    onChange={() => setSelectedList(l)}
+                  />{" "}
+                  {l.title}
+                </label>
+              ))}
+            </div>
+          ) : null}
+        </form>
+      ) : null}
+
       <form onSubmit={runSearch} style={{ margin: "10px 0" }}>
-        <input
-          type="text"
-          value={keywords}
-          onChange={(e) => setKeywords(e.target.value)}
-          placeholder="e.g. real estate sponsor"
-          style={{ padding: 8, width: 320, marginRight: 8 }}
-        />
-        <select value={api} onChange={(e) => setApi(e.target.value)} style={{ padding: 8, marginRight: 8 }}>
-          <option value="sales_navigator">Sales Navigator</option>
-          <option value="classic">Classic</option>
-        </select>
-        <button type="submit" style={btn} disabled={searching || !keywords.trim()}>
-          {searching ? "Searching…" : "Search"}
+        {mode === "keyword" ? (
+          <>
+            <input
+              type="text"
+              value={keywords}
+              onChange={(e) => setKeywords(e.target.value)}
+              placeholder="e.g. real estate sponsor"
+              style={{ padding: 8, width: 320, marginRight: 8 }}
+            />
+            <select value={api} onChange={(e) => setApi(e.target.value)} style={{ padding: 8, marginRight: 8 }}>
+              <option value="sales_navigator">Sales Navigator</option>
+              <option value="classic">Classic</option>
+            </select>
+          </>
+        ) : (
+          <span style={{ fontSize: 13, opacity: 0.75, marginRight: 8 }}>
+            {selectedList ? `Ready to pull: ${selectedList.title}` : "Find and select a list above first."}
+          </span>
+        )}
+        <button
+          type="submit"
+          style={btn}
+          disabled={searching || (mode === "keyword" ? !keywords.trim() : !selectedList)}
+        >
+          {searching ? "Searching…" : mode === "list" ? "Export this list" : "Search"}
         </button>
 
         <div style={{ marginTop: 10, fontSize: 13 }}>
@@ -160,7 +244,7 @@ export default function SearchImportPage() {
 
       {results.length > 0 ? (
         <>
-          <h3>Results for &ldquo;{keywords}&rdquo;</h3>
+          <h3>{mode === "list" ? `Members of "${selectedList?.title}"` : `Results for "${keywords}"`}</h3>
           <div style={{ display: "grid", gap: 6, marginBottom: 20 }}>
             {results.map((p) => (
               <label
