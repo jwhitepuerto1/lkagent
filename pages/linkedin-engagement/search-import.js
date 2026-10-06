@@ -29,6 +29,8 @@ export default function SearchImportPage() {
   const [exporting, setExporting] = useState(false);
   const [error, setError] = useState("");
 
+  const [connFilter, setConnFilter] = useState("");
+  const [connNote, setConnNote] = useState("");
   const [listQuery, setListQuery] = useState("");
   const [listMatches, setListMatches] = useState([]);
   const [selectedList, setSelectedList] = useState(null); // { id, title }
@@ -53,6 +55,46 @@ export default function SearchImportPage() {
     } finally {
       setFindingList(false);
     }
+  }
+
+  async function loadConnections() {
+    setSearching(true);
+    setError("");
+    setConnNote("");
+    try {
+      const res = await fetch("/api/linkedin-engagement/connections", { method: "POST" });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.message || data.error || "Failed to load connections");
+      setResults(data.items);
+      setConnFilter("");
+      setConnNote(
+        data.truncated
+          ? `Loaded ${data.items.length} - stopped at the page cap, so this may not be your full network.`
+          : `Loaded all ${data.items.length} connections.`
+      );
+    } catch (e) {
+      setError(e.message);
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  const CONN_VISIBLE_MAX = 200;
+  const connMatches =
+    mode === "connections"
+      ? results.filter((p) => {
+          const q = connFilter.trim().toLowerCase();
+          if (!q) return true;
+          return `${p.fullName || ""} ${p.headline || ""}`.toLowerCase().includes(q);
+        })
+      : [];
+
+  function selectAllMatching() {
+    setSelected((prev) => {
+      const next = new Map(prev);
+      connMatches.forEach((p) => next.set(p.linkedinUrn, p));
+      return next;
+    });
   }
 
   async function runSearch(e) {
@@ -153,12 +195,51 @@ export default function SearchImportPage() {
 
       <div style={{ margin: "16px 0 6px", fontSize: 13 }}>
         <label style={{ marginRight: 16 }}>
-          <input type="radio" checked={mode === "keyword"} onChange={() => setMode("keyword")} /> Keyword search
+          <input type="radio" checked={mode === "keyword"} onChange={() => { if (mode === "connections") setResults([]); setMode("keyword"); }} /> Keyword search
+        </label>
+        <label style={{ marginRight: 16 }}>
+          <input type="radio" checked={mode === "list"} onChange={() => { if (mode === "connections") setResults([]); setMode("list"); }} /> Export a saved Sales Navigator list
         </label>
         <label>
-          <input type="radio" checked={mode === "list"} onChange={() => setMode("list")} /> Export a saved Sales Navigator list
+          <input
+            type="radio"
+            checked={mode === "connections"}
+            onChange={() => {
+              setMode("connections");
+              setResults([]);
+              setConnNote("");
+            }}
+          />{" "}
+          Export my connections
         </label>
       </div>
+
+      {mode === "connections" ? (
+        <div style={{ margin: "10px 0" }}>
+          <button style={btn} onClick={loadConnections} disabled={searching}>
+            {searching ? "Loading (can take ~20s)…" : "Load my connections"}
+          </button>
+          <span style={{ fontSize: 13, opacity: 0.75 }}>
+            Pulls your 1st-degree connections (name, headline, profile URL; no company). Manual only -
+            Unipile asks for careful use of this call, so don&apos;t hammer it.
+          </span>
+          {connNote ? <p style={{ fontSize: 13, margin: "8px 0" }}>{connNote}</p> : null}
+          {results.length > 0 ? (
+            <div style={{ marginTop: 8 }}>
+              <input
+                type="text"
+                value={connFilter}
+                onChange={(e) => setConnFilter(e.target.value)}
+                placeholder="Filter by name or headline"
+                style={{ padding: 8, width: 320, marginRight: 8 }}
+              />
+              <button style={btn} onClick={selectAllMatching} disabled={connMatches.length === 0}>
+                Select all matching ({connMatches.length})
+              </button>
+            </div>
+          ) : null}
+        </div>
+      ) : null}
 
       {mode === "list" ? (
         <form onSubmit={findLists} style={{ margin: "10px 0" }}>
@@ -191,7 +272,7 @@ export default function SearchImportPage() {
         </form>
       ) : null}
 
-      <form onSubmit={runSearch} style={{ margin: "10px 0" }}>
+      <form onSubmit={runSearch} style={{ margin: "10px 0", display: mode === "connections" ? "none" : "block" }}>
         {mode === "keyword" ? (
           <>
             <input
@@ -244,9 +325,21 @@ export default function SearchImportPage() {
 
       {results.length > 0 ? (
         <>
-          <h3>{mode === "list" ? `Members of "${selectedList?.title}"` : `Results for "${keywords}"`}</h3>
+          <h3>
+            {mode === "connections"
+              ? `Your connections (showing ${Math.min(connMatches.length, CONN_VISIBLE_MAX)} of ${connMatches.length})`
+              : mode === "list"
+                ? `Members of "${selectedList?.title}"`
+                : `Results for "${keywords}"`}
+          </h3>
+          {mode === "connections" && connMatches.length > CONN_VISIBLE_MAX ? (
+            <p style={{ fontSize: 12, opacity: 0.7 }}>
+              Only the first {CONN_VISIBLE_MAX} are listed - use the filter to narrow, or &quot;Select all
+              matching&quot; to take every match.
+            </p>
+          ) : null}
           <div style={{ display: "grid", gap: 6, marginBottom: 20 }}>
-            {results.map((p) => (
+            {(mode === "connections" ? connMatches.slice(0, CONN_VISIBLE_MAX) : results).map((p) => (
               <label
                 key={p.linkedinUrn}
                 style={{ display: "flex", gap: 10, alignItems: "center", border: "1px solid #eee", borderRadius: 6, padding: 8 }}
